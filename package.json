@@ -1,0 +1,22 @@
+{
+  "name": "touchnetpuppet",
+  "version": "1.0.0",
+  "description": "Node server with Puppeteer to automate Reports our of touchnet for Campus Recreation UofSC.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dakine135/TouchnetPuppet.git"
+  },
+  "author": "Dustin Welborn",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/Dakine135/TouchnetPuppet/issues"
+  },
+  "homepage": "https://github.com/Dakine135/TouchnetPuppet#readme",
+  "dependencies": {
+    "puppeteer": "^1.16.0"
+  }
+}
