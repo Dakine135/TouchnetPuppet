@@ -4,6 +4,7 @@ var moment = require('moment');
 const path = require('path');
 const util = require('util');
 const csvParse = require('csv-parse/lib/sync');
+const csvGenerate = require('csv-generate/lib/sync');
 const envInputRaw = fs.readFileSync("env.json");
 const envInput = JSON.parse(envInputRaw);
 var browser;
@@ -11,7 +12,8 @@ var closeWhenDone = true;
  
 (async () => {
 	console.log("Start browser");
-	browser = await puppeteer.launch({headless: true, slowMo:1, devtools:false, dumpio:false}); //{headless: false, slowMo: 250}
+	browser = await puppeteer.launch({headless: true, slowMo:1, devtools:false, dumpio:false}); 
+	//{headless: false, slowMo: 250}
 	
 	//login
 	let loginToken = await connectAndLogin();
@@ -25,11 +27,18 @@ var closeWhenDone = true;
 	let reportRaw = await getReport(loginToken,dateStart,dateEnd);
 	// console.log('ReportRaw:', reportRaw);
 
-	//clean up report
-	let report = await cleanUpReport(reportRaw);
+	//clean up report and make csv
+	let report = await cleanUpReportGetCSV(reportRaw);
 	console.log('Report:', report);
 
-
+	//save report to location
+	const writeFileAsync = util.promisify(fs.writeFile);
+	await writeFileAsync("./output/GroupXPasses.csv", report, function(err) {
+	    if(err) {
+	        return console.log(err);
+	    }
+	    console.log("The file was saved!");
+	}); 
  	
  	console.log("finished script");
  	
@@ -136,19 +145,21 @@ async function getReport(token,startDate,endDate){
     // console.log("output:",output);
 
     //clean up downloaded file
-    fs.unlink(filePath, (err) => {
-		if (err) throw err;
-		console.log(filePath, 'was deleted');
-		let folderPath =  path.dirname(filePath);
-		// console.log('folderPath:',folderPath);
-		//THEN delete folder
-		fs.rmdir(folderPath, (err) => {
-		  if (err) throw err;
-		  console.log(folderPath, 'was deleted');
-		});	
-	});
-	
+    const deleteFileAsync = util.promisify(fs.unlink);
+    const deleteFolderAsync = util.promisify(fs.rmdir);
+    await deleteFileAsync(filePath);
+    console.log(filePath, 'was deleted');
+    let folderPath =  path.dirname(filePath);
 
+    let fileName = "Not Null";
+    while (fileName) {
+	    await new Promise(resolve => setTimeout(resolve, 100)); //, reject => console.log('reject')
+	    [fileName] = await util.promisify(fs.readdir)(folderPath);
+	    console.log("Waiting for File to be deleted");
+  	}
+  	//cant delete folder until file is deleted
+    await deleteFolderAsync(folderPath);
+    console.log(folderPath, 'was deleted');
 	
     
 	if(closeWhenDone) {await page1.close(); await page2.close()}
@@ -213,17 +224,11 @@ Date Fulfilled	Email Address	First Name	Last Name	VIP Number
 04/14/2019 01:46:24 PM EST	cah21@email.sc.edu	Catherine	Hood	482081
 
 */
-function cleanUpReport(reportRaw){
-	let cleanData = [];
+function cleanUpReportGetCSV(reportRaw){
+	let output = "Date Fulfilled,Email Address,First Name,Last Name,VIP Number\n";
 	reportRaw.forEach((item)=>{
-		let cleanItem = {};
-		// console.log(item['First Name']);
-		cleanItem['Date Fulfilled'] = item['Date Fulfilled'];
-		cleanItem['Email Address'] = item['Email Address'];
-		cleanItem['First Name'] = item['First Name'];
-		cleanItem['Last Name'] = item['Last Name'];
-		cleanItem['VIP Number'] = item['VIP Number'];
-		cleanData.push(cleanItem);
+		let row = `${item['Date Fulfilled']},${item['Email Address']},${item['First Name']},${item['Last Name']},${item['VIP Number']}\n`;
+		output = output + row;
 	});
-	return cleanData;
+	return output;
 }
