@@ -9,10 +9,13 @@ const envInputRaw = fs.readFileSync("env.json");
 const envInput = JSON.parse(envInputRaw);
 var browser;
 var closeWhenDone = true;
+var deleteDownload = true;
+var showBrowser = false;
+var dayBackForReport = 3;
  
 (async () => {
 	console.log("Start browser");
-	browser = await puppeteer.launch({headless: true, slowMo:1, devtools:false, dumpio:false}); 
+	browser = await puppeteer.launch({headless: !showBrowser, slowMo:1, devtools:false, dumpio:false}); 
 	//{headless: false, slowMo: 250}
 	
 	//login
@@ -20,25 +23,31 @@ var closeWhenDone = true;
 	console.log("logged in with Token", loginToken);
 
 	//get everything since the begning of yesterday
-	let dateStart = moment().subtract(1,'day').startOf('day');
+	let dateStart = moment().subtract(dayBackForReport,'day').startOf('day');
 	let dateEnd = moment();
 
 	//get raw report as json
 	let reportRaw = await getReport(loginToken,dateStart,dateEnd);
 	// console.log('ReportRaw:', reportRaw);
 
-	//clean up report and make csv
-	let report = await cleanUpReportGetCSV(reportRaw);
-	console.log('Report:', report);
+	if(reportRaw != null){
+		//clean up report and make csv
+		let report = await cleanUpReportGetCSV(reportRaw);
+		// console.log('Report:', report);
 
-	//save report to location
-	const writeFileAsync = util.promisify(fs.writeFile);
-	await writeFileAsync("./output/GroupXPasses.csv", report, function(err) {
-	    if(err) {
-	        return console.log(err);
-	    }
-	    console.log("The file was saved!");
-	}); 
+		//save report to location
+		const writeFileAsync = util.promisify(fs.writeFile);
+		await writeFileAsync("./output/GroupXPasses.csv", report, function(err) {
+		    if(err) {
+		        return console.log(err);
+		    }
+		    console.log("The file was saved!");
+		});
+	} else { //report Check, could be none/empty/null
+		console.log("No report to create");
+	}
+
+	 
  	
  	console.log("finished script");
  	
@@ -132,34 +141,58 @@ async function getReport(token,startDate,endDate){
 	let page2 = await browser.newPage();
 	await page2.goto(url2).catch(()=>{console.log('ignore error')});
 
-	//clicks download and grabs file path
-	const filePath = await download(page2, ()=>{
-		page2.click('input[value="Export to CSV"]');
+	//check if downloads available
+	let downloadButton = await page2.evaluate(() => {
+		let downloadButtonReturn = document.querySelector('input[value="Export to CSV"]');
+		console.log("download Button", downloadButtonReturn);
+		return downloadButtonReturn;
 	});
-	// console.log('filePath:', filePath);
-	const { size } = await util.promisify(fs.stat)(filePath);
-    console.log('FilePath: ', filePath, `${size}B`);
+	var output = null;
+	if(downloadButton != null){
+		//clicks download and grabs file path
+		const filePath = await download(page2, ()=>{
+			try{
+				// console.log("Trying to click Download");
+				page2.click('input[value="Export to CSV"]');
+				// console.log("After Click");
+			} catch(e){
+				console.log("No entries to download");
+			}
+			
+		});
 
-    //reads file that was downloaded and parses to json from csv
-    let output = await readAndParseFile(filePath);
-    // console.log("output:",output);
+		// console.log('filePath:', filePath);
+		const { size } = await util.promisify(fs.stat)(filePath);
+	    console.log('FilePath: ', filePath, `${size}B`);
 
-    //clean up downloaded file
-    const deleteFileAsync = util.promisify(fs.unlink);
-    const deleteFolderAsync = util.promisify(fs.rmdir);
-    await deleteFileAsync(filePath);
-    console.log(filePath, 'was deleted');
-    let folderPath =  path.dirname(filePath);
+	    //reads file that was downloaded and parses to json from csv
+	    output = await readAndParseFile(filePath);
+	    // console.log("output:",output);
 
-    let fileName = "Not Null";
-    while (fileName) {
-	    await new Promise(resolve => setTimeout(resolve, 100)); //, reject => console.log('reject')
-	    [fileName] = await util.promisify(fs.readdir)(folderPath);
-	    console.log("Waiting for File to be deleted");
-  	}
-  	//cant delete folder until file is deleted
-    await deleteFolderAsync(folderPath);
-    console.log(folderPath, 'was deleted');
+	    //clean up downloaded file
+	    if(deleteDownload){
+		    const deleteFileAsync = util.promisify(fs.unlink);
+		    const deleteFolderAsync = util.promisify(fs.rmdir);
+		    await deleteFileAsync(filePath);
+		    console.log(filePath, 'was deleted');
+		    let folderPath =  path.dirname(filePath);
+
+		    let fileName = "Not Null";
+		    while (fileName) {
+			    await new Promise(resolve => setTimeout(resolve, 100)); //, reject => console.log('reject')
+			    [fileName] = await util.promisify(fs.readdir)(folderPath);
+			    console.log("Waiting for File to be deleted");
+		  	}
+		  	//cant delete folder until file is deleted
+		    await deleteFolderAsync(folderPath);
+		    console.log(folderPath, 'was deleted');
+		}
+
+
+	} // download button check
+	else{
+		console.log("No downloads available");
+	}
 	
     
 	if(closeWhenDone) {await page1.close(); await page2.close()}
@@ -184,7 +217,7 @@ async function download(page, f) {
 
   // console.log("BEFORE download triggered");
   // await page.goto(url).catch(()=>{console.log('ignore error')});
-  await f();
+  try{await f();} catch(e){console.log("catch",e);};
   // console.log("AFTER download triggered");
 
   console.error('Downloading...');
@@ -204,16 +237,73 @@ async function readAndParseFile(filePath){
 	try{
 		let data = await readFileAsync(filePath, {encoding: 'utf8'});
 		// console.log("data:",data);
-		let output = csvParse(data, {
-			  columns: true,
-			  skip_empty_lines: true
-		});
+		let output = myCSVParser(data);
+		// let output = csvParse(data, {
+		// 	  columns: false,
+		// 	  skip_empty_lines: true
+		// });
 		// console.log("output IN:",output);
 		return output;
 	} catch(err){
 
 	}
 }
+
+//needs to support duplicate headers by combining the contents into one cell
+function myCSVParser(string){
+	let result = [];
+	let headers = {};
+	let delimiter = ',';
+
+	//split all rows by new line
+	let rows = string.split('\n');
+
+	//get headers, each header is the key and the index(s) of the comlumn
+	let headersString = rows[0];
+	headersString = headersString.replace(/"/g, '');
+	let headersStringSplit = headersString.split(delimiter);
+	headersStringSplit.forEach((header,index)=>{
+		// console.log("header:", header);
+		if(headers[header] == null){
+			headers[header] = [index];
+		} else {
+			headers[header].push(index);
+		}
+	});
+	// console.log("===========");
+	// console.log(headers);
+	// console.log("===========");
+
+	//go through all the rows and create objects with the header properties
+	rows.forEach((row,index)=>{
+		if(index!=0){
+			row = row.replace(/"/g, '');
+			// console.log(row);
+			let rowSplit = row.split(delimiter);
+			// console.log(rowSplit);
+			let rowObj = {};
+			
+			for(var header in headers){
+				var value = "";
+				headers[header].forEach((index)=>{
+					// console.log(index);
+					if((rowSplit[index] != "" && rowSplit[index] != " "&& rowSplit[index] != '') && 
+						rowSplit[index] != null && rowSplit[index] != undefined &&
+						rowSplit[index] != value){
+						 value = rowSplit[index];
+					}
+					// console.log(value);
+				});
+				// console.log(value);
+				rowObj[header] = value;
+			}
+			result.push(rowObj);
+		}
+	});
+
+	return result;
+
+} //myCSVParser
 
 /*
 File Name: GroupXPasses.csv                                         
@@ -227,8 +317,10 @@ Date Fulfilled	Email Address	First Name	Last Name	VIP Number
 function cleanUpReportGetCSV(reportRaw){
 	let output = "Date Fulfilled,Email Address,First Name,Last Name,VIP Number\n";
 	reportRaw.forEach((item)=>{
+		// console.log(item);
 		let row = `${item['Date Fulfilled']},${item['Email Address']},${item['First Name']},${item['Last Name']},${item['VIP Number']}\n`;
-		output = output + row;
+		// console.log(row);
+		if(item['VIP Number'] != '') output = output + row;
 	});
 	return output;
 }
