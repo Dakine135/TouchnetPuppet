@@ -18,7 +18,7 @@
   "homepage": "https://github.com/Dakine135/TouchnetPuppet#readme",
   "dependencies": {
     "csv": "^5.1.1",
-    "moment": "^2.24.0",
+    "moment": "^2.29.4",
     "puppeteer": "^1.16.0"
   }
 }
